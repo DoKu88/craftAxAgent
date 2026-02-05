@@ -14,11 +14,13 @@ class GameRunner:
         environment: CraftaxEnvironment,
         max_steps: int = 1000,
         verbose: bool = True,
+        replay_fps: int = 8,
     ) -> None:
         self.agent = agent
         self.environment = environment
         self.max_steps = max_steps
         self.verbose = verbose
+        self.replay_fps = replay_fps
 
     def run_episode(self) -> dict:
         """Run a single episode. Returns stats dict."""
@@ -59,7 +61,7 @@ class GameRunner:
             n_achieved = sum(1 for v in agent_input.achievements.values() if v)
             print(f"  Achievements: {n_achieved}")
 
-        return {
+        result = {
             "steps": steps,
             "total_reward": total_reward,
             "dungeon_floor": agent_input.dungeon_floor,
@@ -67,10 +69,21 @@ class GameRunner:
             "achievements": sum(1 for v in agent_input.achievements.values() if v),
         }
 
+        if self.environment.record:
+            replay_path = self.environment.save_replay(
+                path=f"replays/episode_{self._episode_num}.gif",
+                fps=self.replay_fps,
+            )
+            result["replay_path"] = str(replay_path)
+
+        return result
+
     def run(self, n_episodes: int = 1) -> list[dict]:
         """Run multiple episodes and print summary."""
         results = []
+        self._episode_num = 0
         for ep in range(n_episodes):
+            self._episode_num = ep + 1
             if self.verbose:
                 print(f"\n--- Episode {ep + 1}/{n_episodes} ---")
             result = self.run_episode()

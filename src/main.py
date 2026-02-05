@@ -26,6 +26,7 @@ def main() -> None:
         env_name=env_cfg.get("env_name", "Craftax-Symbolic-v1"),
         seed=env_cfg.get("seed", 42),
         auto_reset=env_cfg.get("auto_reset", False),
+        record=env_cfg.get("record", False),
     )
 
     # Build agent via factory
@@ -47,6 +48,7 @@ def main() -> None:
         environment=environment,
         max_steps=env_cfg.get("max_steps", 1000),
         verbose=True,
+        replay_fps=env_cfg.get("replay_fps", 8),
     )
 
     # Run
