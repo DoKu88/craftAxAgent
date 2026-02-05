@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "craftax-agent"
+version = "0.1.0"
+description = "AI Agent framework for playing Craftax"
+requires-python = ">=3.10"
+dependencies = [
+    "craftax>=1.5.0",
+    "jax",
+    "jaxlib",
+    "pydantic>=2.0",
+    "openai>=1.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+craftax-agent = "src.main:main"
+
+[tool.setuptools.packages.find]
+include = ["src*"]

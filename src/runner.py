@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+from src.agent import BaseAgent
+from src.environment import CraftaxEnvironment
+from src.models import ACTION_NAMES
+
+
+class GameRunner:
+    """Runs Craftax episodes with an agent."""
+
+    def __init__(
+        self,
+        agent: BaseAgent,
+        environment: CraftaxEnvironment,
+        max_steps: int = 1000,
+        verbose: bool = True,
+    ) -> None:
+        self.agent = agent
+        self.environment = environment
+        self.max_steps = max_steps
+        self.verbose = verbose
+
+    def run_episode(self) -> dict:
+        """Run a single episode. Returns stats dict."""
+        self.agent.reset()
+        agent_input = self.environment.reset()
+
+        total_reward = 0.0
+        steps = 0
+
+        if self.verbose:
+            print(f"\n{'='*50}")
+            print(f"Starting episode with agent: {self.agent.name}")
+            print(f"{'='*50}")
+
+        while steps < self.max_steps:
+            agent_output = self.agent(agent_input)
+            action_name = ACTION_NAMES.get(agent_output.action, "UNKNOWN")
+
+            agent_input, reward, done, info = self.environment.step(agent_output.action)
+            total_reward += reward
+            steps += 1
+
+            if self.verbose and steps % 100 == 0:
+                print(
+                    f"  Step {steps}: action={action_name}, "
+                    f"reward={reward:.2f}, total={total_reward:.2f}, "
+                    f"health={agent_input.intrinsics.get('health', '?')}, "
+                    f"floor={agent_input.dungeon_floor}"
+                )
+
+            if done:
+                break
+
+        if self.verbose:
+            print(f"\nEpisode finished: steps={steps}, total_reward={total_reward:.2f}")
+            print(f"  Final floor: {agent_input.dungeon_floor}")
+            print(f"  Final health: {agent_input.intrinsics.get('health', '?')}")
+            n_achieved = sum(1 for v in agent_input.achievements.values() if v)
+            print(f"  Achievements: {n_achieved}")
+
+        return {
+            "steps": steps,
+            "total_reward": total_reward,
+            "dungeon_floor": agent_input.dungeon_floor,
+            "done": done,
+            "achievements": sum(1 for v in agent_input.achievements.values() if v),
+        }
+
+    def run(self, n_episodes: int = 1) -> list[dict]:
+        """Run multiple episodes and print summary."""
+        results = []
+        for ep in range(n_episodes):
+            if self.verbose:
+                print(f"\n--- Episode {ep + 1}/{n_episodes} ---")
+            result = self.run_episode()
+            results.append(result)
+
+        if n_episodes > 1 and self.verbose:
+            avg_reward = sum(r["total_reward"] for r in results) / n_episodes
+            avg_steps = sum(r["steps"] for r in results) / n_episodes
+            print(f"\n{'='*50}")
+            print(f"Summary over {n_episodes} episodes:")
+            print(f"  Avg reward: {avg_reward:.2f}")
+            print(f"  Avg steps:  {avg_steps:.1f}")
+            print(f"{'='*50}")
+
+        return results
