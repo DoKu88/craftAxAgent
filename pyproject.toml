@@ -9,6 +9,7 @@ description = "AI Agent framework for playing Craftax"
 requires-python = ">=3.10"
 dependencies = [
     "craftax>=1.5.0",
+    "python-dotenv>=1.0",
     "jax",
     "jaxlib",
     "pydantic>=2.0",

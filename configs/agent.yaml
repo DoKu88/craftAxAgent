@@ -1,4 +1,4 @@
-type: random          # "random" or "openai"
+type: openai          # "random" or "openai"
 model: gpt-4o-mini    # OpenAI model name (used when type=openai)
 history_length: 5     # Number of past observations to include in LLM prompt
 temperature: 0.7      # LLM sampling temperature

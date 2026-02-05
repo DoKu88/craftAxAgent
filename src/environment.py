@@ -5,6 +5,7 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import numpy as np
+import imageio.v3 as iio
 from craftax.craftax.constants import BLOCK_PIXEL_SIZE_IMG
 from craftax.craftax.renderer import render_craftax_pixels
 from craftax.craftax_env import make_craftax_env_from_name
@@ -110,8 +111,7 @@ class CraftaxEnvironment:
             path: Output file path (.gif or .mp4)
             fps: Frames per second
             block_pixel_size: Pixel size per tile (default: BLOCK_PIXEL_SIZE_IMG=16)
-        """
-        import imageio.v3 as iio
+        """        
 
         if not self._recorded_states:
             raise RuntimeError("No recorded states. Set record=True and run an episode first.")

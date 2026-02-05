@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from src.agent import AgentFactory
 from src.environment import CraftaxEnvironment
