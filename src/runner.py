@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
+
+import coolname
+
 from src.agent import BaseAgent
 from src.environment import CraftaxEnvironment
 from src.models import ACTION_NAMES
@@ -70,8 +74,10 @@ class GameRunner:
         }
 
         if self.environment.record:
+            slug = coolname.generate_slug(2)  # e.g. "brave-tiger"
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             replay_path = self.environment.save_replay(
-                path=f"replays/episode_{self._episode_num}.gif",
+                path=f"replays/{slug}_{timestamp}.mp4",
                 fps=self.replay_fps,
             )
             result["replay_path"] = str(replay_path)

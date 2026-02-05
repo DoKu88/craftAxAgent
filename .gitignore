@@ -1,6 +1,12 @@
-*__pycache__*
-*.egg-info
+# Python
+__pycache__/
 *.pyc
+*.egg-info
+
+# Project
 *.gif
 .env
-.pyc
+replays/
+
+# macOS
+.DS_Store

@@ -5,7 +5,7 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import numpy as np
-import imageio.v3 as iio
+import imageio
 from craftax.craftax.constants import BLOCK_PIXEL_SIZE_IMG
 from craftax.craftax.renderer import render_craftax_pixels
 from craftax.craftax_env import make_craftax_env_from_name
@@ -101,18 +101,19 @@ class CraftaxEnvironment:
 
     def save_replay(
         self,
-        path: str | Path = "replay.gif",
+        path: str | Path = "replay.mp4",
         fps: int = 8,
         block_pixel_size: int | None = None,
     ) -> Path:
-        """Render recorded states to a GIF or MP4 file.
+        """Render recorded states to an MP4 file.
 
         Args:
-            path: Output file path (.gif or .mp4)
+            path: Output file path (.mp4)
             fps: Frames per second
             block_pixel_size: Pixel size per tile (default: BLOCK_PIXEL_SIZE_IMG=16)
-        """        
 
+        Requires: imageio-ffmpeg (pip install imageio[ffmpeg])
+        """
         if not self._recorded_states:
             raise RuntimeError("No recorded states. Set record=True and run an episode first.")
 
@@ -122,21 +123,17 @@ class CraftaxEnvironment:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        print(f"Rendering {len(self._recorded_states)} frames...")
-        frames = []
+        n_frames = len(self._recorded_states)
+        print(f"Rendering {n_frames} frames...")
+
+        writer = imageio.get_writer(path, fps=fps, macro_block_size=1)
         for i, state in enumerate(self._recorded_states):
             pixels = self._render_fn(state, block_pixel_size)
             frame = np.asarray(pixels, dtype=np.uint8)
-            frames.append(frame)
+            writer.append_data(frame)
             if (i + 1) % 100 == 0:
-                print(f"  Rendered {i + 1}/{len(self._recorded_states)} frames")
+                print(f"  Rendered {i + 1}/{n_frames} frames")
+        writer.close()
 
-        print(f"Writing {path}...")
-        if path.suffix == ".mp4":
-            iio.imwrite(path, frames, fps=fps)
-        else:
-            # GIF: duration per frame in ms
-            iio.imwrite(path, frames, duration=int(1000 / fps), loop=0)
-
-        print(f"Replay saved to {path} ({len(frames)} frames)")
+        print(f"Replay saved to {path} ({n_frames} frames)")
         return path
