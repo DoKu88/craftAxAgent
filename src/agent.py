@@ -21,6 +21,91 @@ from src.models import (
 )
 
 
+_DIRECTION_DELTA = {
+    "UP": (-1, 0),
+    "DOWN": (1, 0),
+    "LEFT": (0, -1),
+    "RIGHT": (0, 1),
+}
+
+
+def _parse_offset(entry: str) -> tuple[str, int, int] | None:
+    """Parse 'TYPE (+dr,+dc)' into (type_name, dr, dc)."""
+    match = re.match(r"^(.+?)\s+\(([+-]?\d+),([+-]?\d+)\)$", entry)
+    if not match:
+        return None
+    return match.group(1), int(match.group(2)), int(match.group(3))
+
+
+def _direction_to(dr: int, dc: int) -> str:
+    """Primary direction to reach (dr, dc) from origin."""
+    if abs(dr) >= abs(dc):
+        return "DOWN" if dr > 0 else "UP"
+    return "RIGHT" if dc > 0 else "LEFT"
+
+
+def _navigation_hints(agent_input: AgentInput) -> list[str]:
+    """Compute navigation hints: nearest resources, mobs, items with directions."""
+    hints = []
+    facing = agent_input.direction
+    face_dr, face_dc = _DIRECTION_DELTA.get(facing, (0, 0))
+
+    # Group nearby blocks by type, find nearest of each
+    resource_types = {
+        "TREE", "COAL", "IRON", "DIAMOND", "SAPPHIRE", "RUBY",
+        "WATER", "CRAFTING_TABLE", "FURNACE", "RIPE_PLANT",
+        "ENCHANTMENT_TABLE_FIRE", "ENCHANTMENT_TABLE_ICE",
+    }
+    nearest: dict[str, tuple[int, int, int]] = {}  # type -> (dist, dr, dc)
+    for entry in agent_input.nearby_blocks:
+        parsed = _parse_offset(entry)
+        if not parsed:
+            continue
+        name, dr, dc = parsed
+        if name not in resource_types:
+            continue
+        dist = abs(dr) + abs(dc)
+        if dist == 0:
+            continue
+        if name not in nearest or dist < nearest[name][0]:
+            nearest[name] = (dist, dr, dc)
+
+    for name, (dist, dr, dc) in sorted(nearest.items(), key=lambda x: x[1][0]):
+        direction = _direction_to(dr, dc)
+        if dist == 1 and dr == face_dr and dc == face_dc:
+            hints.append(f"nearest {name}: 1 tile {direction}, facing it → use DO")
+        elif dist == 1:
+            hints.append(f"nearest {name}: 1 tile {direction} → move {direction} to face it, then DO")
+        else:
+            hints.append(f"nearest {name}: {dist} tiles, move {direction}")
+
+    # Nearest mob (threat awareness)
+    for entry in agent_input.nearby_mobs:
+        parsed = _parse_offset(entry)
+        if not parsed:
+            continue
+        name, dr, dc = parsed
+        dist = abs(dr) + abs(dc)
+        direction = _direction_to(dr, dc)
+        flee = _direction_to(-dr, -dc) if (dr, dc) != (0, 0) else "UP"
+        hints.append(f"{name}: {dist} tiles {direction} (flee: {flee})")
+
+    # Nearby items (ladders, torches)
+    for entry in agent_input.nearby_items:
+        parsed = _parse_offset(entry)
+        if not parsed:
+            continue
+        name, dr, dc = parsed
+        dist = abs(dr) + abs(dc)
+        if dist == 0:
+            hints.append(f"{name}: on your tile")
+        else:
+            direction = _direction_to(dr, dc)
+            hints.append(f"{name}: {dist} tiles, move {direction}")
+
+    return hints
+
+
 class BaseAgent(ABC):
     """Abstract base agent for Craftax. Subclasses implement act()."""
 
@@ -29,6 +114,7 @@ class BaseAgent(ABC):
     def __init__(self, history_length: int = 0, **kwargs) -> None:
         self.history_length = history_length
         self._history: List[tuple[AgentInput, AgentOutput]] = []
+        self._recent_actions: List[int] = []
 
     @abstractmethod
     def act(self, agent_input: AgentInput) -> AgentOutput:
@@ -38,11 +124,15 @@ class BaseAgent(ABC):
     def reset(self) -> None:
         """Clear history for a new episode."""
         self._history.clear()
+        self._recent_actions.clear()
 
     def __call__(self, agent_input: AgentInput) -> AgentOutput:
         """Public API: calls act() and records history."""
         output = self.act(agent_input)
         self._record_history(agent_input, output)
+        self._recent_actions.append(output.action)
+        if len(self._recent_actions) > 10:
+            self._recent_actions = self._recent_actions[-10:]
         return output
 
     def _record_history(self, agent_input: AgentInput, agent_output: AgentOutput) -> None:
@@ -142,6 +232,13 @@ class BaseAgent(ABC):
             for b in notable_blocks[:20]:
                 lines.append(f"  {b}")
 
+        # Navigation hints (pre-computed directions)
+        hints = _navigation_hints(agent_input)
+        if hints:
+            lines.append("\n--- Navigation Hints ---")
+            for h in hints:
+                lines.append(f"  {h}")
+
         return "\n".join(lines)
 
 
@@ -161,33 +258,50 @@ class RandomAgent(BaseAgent):
 
 SYSTEM_PROMPT = """You are an AI agent playing Craftax, a roguelike survival game. Your goal is to survive as long as possible, gather resources, craft tools and weapons, and descend through dungeon floors.
 
-Game mechanics:
-- You explore a 2D grid world across multiple dungeon floors
-- Manage health, food, drink, energy, and mana
-- Gather resources (wood, stone, coal, iron, diamond, sapphire, ruby)
-- Craft pickaxes and swords (wood < stone < iron < diamond)
-- Fight monsters in melee, with arrows, or with spells
-- Kill 8 monsters per floor to unlock the descending ladder
-- Place crafting tables and furnaces to craft advanced items
-- Rest to recover energy, sleep to pass night
+## Movement & Interaction
 
-Strategy tips:
-- Prioritize gathering wood and stone early
-- Craft a pickaxe first, then a sword
-- Keep health, food, and drink above critical levels
-- Fight weaker mobs first, avoid strong ones without good gear
-- Use DO action to interact with the tile you're facing (mine, chop, attack, pick up)
-- Move towards resources and away from danger when under-equipped
+You are on a 2D grid. Nearby objects are shown as (row, col) offsets from your position:
+- Negative row = UP from you, positive row = DOWN
+- Negative col = LEFT from you, positive col = RIGHT
+- (0, 0) is your current tile
 
-Available actions (by ID):
+CRITICAL — Movement and facing:
+- Moving LEFT/RIGHT/UP/DOWN moves you 1 tile AND sets your facing direction
+- DO interacts with the tile you are FACING (chop trees, mine stone, attack mobs, pick up items)
+- You MUST face a target before using DO. Example: a tree at (0, +1) is to your RIGHT. Move RIGHT to face it, then DO to chop it.
+- If DO has no effect, you are probably not facing your target. Check the Navigation Hints.
+
+## Game Mechanics
+- Manage health, food, drink, energy, and mana — if any reaches 0 you weaken or die
+- Gather resources: wood (from trees), stone, coal, iron, diamond, sapphire, ruby
+- Craft pickaxes and swords at a placed crafting table (wood < stone < iron < diamond)
+- Smelt iron at a placed furnace
+- Kill 8 monsters per floor to clear the ladder, then DESCEND
+- Rest to recover energy, sleep to pass night safely
+- Eat ripe plants for food, drink at water tiles
+
+## Strategy
+- Gather wood first (chop trees), then stone (mine stone blocks with a pickaxe)
+- Craft a wood pickaxe ASAP, then a wood sword for defense
+- Keep health/food/drink above 3 — prioritize survival over progression
+- Fight passive mobs for easy XP; avoid melee/ranged mobs without a sword
+- If a Navigation Hint says "facing it, use DO" — just use DO
+- If nothing useful is nearby, explore by moving in a consistent direction
+
+## Available Actions
 """
 
 # Append the action list to the system prompt
 _action_list = "\n".join(f"  {i}: {name}" for i, name in ACTION_NAMES.items())
 SYSTEM_PROMPT += _action_list + """
 
-You MUST respond with a JSON object: {"action": <id>, "reasoning": "<brief explanation>"}
-Only output the JSON. No other text."""
+## Response Format
+Think step-by-step, then respond with JSON:
+1. What is my situation? (health, resources, threats)
+2. What should I prioritize right now?
+3. What is my target and which direction is it?
+
+{"action": <id>, "reasoning": "<your step-by-step reasoning>"}"""
 
 
 class OpenAIAgent(BaseAgent):
@@ -257,7 +371,7 @@ class OpenAIAgent(BaseAgent):
             model=self.model,
             messages=messages,
             temperature=self.temperature,
-            max_tokens=150,
+            max_tokens=300,
             response_format={"type": "json_object"},
         )
 
@@ -281,6 +395,18 @@ class OpenAIAgent(BaseAgent):
 
     def _build_user_prompt(self, agent_input: AgentInput) -> str:
         parts = []
+
+        # Stuck detection warning
+        if len(self._recent_actions) >= 3:
+            last_3 = self._recent_actions[-3:]
+            if len(set(last_3)) == 1:
+                action_name = ACTION_NAMES.get(last_3[0], "UNKNOWN")
+                parts.append(
+                    f"WARNING: You have repeated {action_name} for the last {len(last_3)} steps "
+                    f"with no change in state. Your action is having no effect. "
+                    f"Try something different — you likely need to MOVE to reposition first."
+                )
+                parts.append("")
 
         # Current observation
         parts.append("=== Current Observation ===")
