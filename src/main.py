@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import yaml
@@ -18,11 +19,34 @@ def load_config(path: str | Path) -> dict:
         return yaml.safe_load(f) or {}
 
 
+def setup_logging(env_cfg: dict) -> None:
+    """Configure logging for the craftax logger."""
+    log_level = env_cfg.get("log_level", "INFO").upper()
+    log_file = env_cfg.get("log_file", None)
+
+    craftax_logger = logging.getLogger("craftax")
+    craftax_logger.setLevel(getattr(logging, log_level, logging.INFO))
+    formatter = logging.Formatter("%(asctime)s | %(message)s", datefmt="%H:%M:%S")
+
+    # Always log to stderr so it doesn't mix with print output
+    console = logging.StreamHandler()
+    console.setFormatter(formatter)
+    craftax_logger.addHandler(console)
+
+    # Optionally also log to file
+    if log_file:
+        fh = logging.FileHandler(log_file, mode="w")
+        fh.setFormatter(formatter)
+        craftax_logger.addHandler(fh)
+
+
 def main() -> None:
     config_dir = Path(__file__).resolve().parent.parent / "configs"
 
     agent_cfg = load_config(config_dir / "agent.yaml")
     env_cfg = load_config(config_dir / "env.yaml")
+
+    setup_logging(env_cfg)
 
     # Build environment
     environment = CraftaxEnvironment(
@@ -52,6 +76,7 @@ def main() -> None:
         max_steps=env_cfg.get("max_steps", 1000),
         verbose=True,
         replay_fps=env_cfg.get("replay_fps", 8),
+        log_interval=env_cfg.get("log_interval", 1),
     )
 
     # Run

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 import coolname
@@ -7,6 +8,8 @@ import coolname
 from src.agent import BaseAgent
 from src.environment import CraftaxEnvironment
 from src.models import ACTION_NAMES
+
+logger = logging.getLogger("craftax")
 
 
 class GameRunner:
@@ -19,12 +22,14 @@ class GameRunner:
         max_steps: int = 1000,
         verbose: bool = True,
         replay_fps: int = 8,
+        log_interval: int = 1,
     ) -> None:
         self.agent = agent
         self.environment = environment
         self.max_steps = max_steps
         self.verbose = verbose
         self.replay_fps = replay_fps
+        self.log_interval = log_interval
 
     def run_episode(self) -> dict:
         """Run a single episode. Returns stats dict."""
@@ -40,8 +45,24 @@ class GameRunner:
             print(f"{'='*50}")
 
         while steps < self.max_steps:
+            # Log agent input before acting
+            if self.log_interval and steps % self.log_interval == 0:
+                obs_text = self.agent._format_observation(agent_input)
+                logger.info("AGENT INPUT (step %d):\n%s", steps, obs_text)
+
             agent_output = self.agent(agent_input)
             action_name = ACTION_NAMES.get(agent_output.action, "UNKNOWN")
+
+            # Log agent output after acting
+            if self.log_interval and steps % self.log_interval == 0:
+                logger.info(
+                    "AGENT OUTPUT (step %d): action=%s (%d) | reasoning=%s | confidence=%s",
+                    steps,
+                    action_name,
+                    agent_output.action,
+                    agent_output.reasoning or "-",
+                    f"{agent_output.confidence:.2f}" if agent_output.confidence is not None else "-",
+                )
 
             agent_input, reward, done, info = self.environment.step(agent_output.action)
             total_reward += reward
