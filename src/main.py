@@ -72,6 +72,7 @@ def main() -> None:
     if agent_type == "openai":
         agent_kwargs["model"] = agent_cfg.get("model", "gpt-4o-mini")
         agent_kwargs["temperature"] = agent_cfg.get("temperature", 0.7)
+        agent_kwargs["log_mute_system"] = env_cfg.get("log_mute_system", False)
 
     print(f"Creating agent: {agent_type}")
     print(f"Available agents: {AgentFactory.list_agents()}")

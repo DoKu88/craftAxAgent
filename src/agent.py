@@ -201,11 +201,13 @@ class OpenAIAgent(BaseAgent):
         model: str = "gpt-4o-mini",
         temperature: float = 0.7,
         api_key: str | None = None,
+        log_mute_system: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(history_length=history_length, **kwargs)
         self.model = model
         self.temperature = temperature
+        self.log_mute_system = log_mute_system
         resolved_key = api_key or os.environ.get("OPENAI_API_KEY")
         if not resolved_key:
             raise ValueError(
@@ -236,14 +238,18 @@ class OpenAIAgent(BaseAgent):
         messages.append({"role": "user", "content": f"[CURRENT]\n{user_prompt}"})
 
         # Log full message array sent to LLM
+        log_messages = messages
+        if self.log_mute_system:
+            log_messages = [m for m in messages if m["role"] != "system"]
         logger.info(
-            "STEP %d — LLM REQUEST (%d messages, %d history turns)\n%s",
+            "STEP %d — LLM REQUEST (%d messages, %d history turns%s)\n%s",
             agent_input.step,
             len(messages),
             len(self._history),
+            ", system prompt muted" if self.log_mute_system else "",
             "\n".join(
                 f"--- [{m['role'].upper()}] ---\n{m['content']}"
-                for m in messages
+                for m in log_messages
             ),
         )
 
