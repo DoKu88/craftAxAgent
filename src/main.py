@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import yaml
+import coolname
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,7 +21,7 @@ def load_config(path: str | Path) -> dict:
         return yaml.safe_load(f) or {}
 
 
-def setup_logging(env_cfg: dict) -> None:
+def setup_logging(env_cfg: dict, run_slug: str, run_timestamp: str) -> None:
     """Configure logging for the craftax logger."""
     log_level = env_cfg.get("log_level", "INFO").upper()
     log_file = env_cfg.get("log_file", None)
@@ -35,7 +37,11 @@ def setup_logging(env_cfg: dict) -> None:
 
     # Optionally also log to file
     if log_file:
-        fh = logging.FileHandler(log_file, mode="w")
+        formatted_log_file = log_file.format(
+            timestamp=run_timestamp,
+            slug=run_slug,
+        )
+        fh = logging.FileHandler(formatted_log_file, mode="w")
         fh.setFormatter(formatter)
         craftax_logger.addHandler(fh)
 
@@ -46,7 +52,9 @@ def main() -> None:
     agent_cfg = load_config(config_dir / "agent.yaml")
     env_cfg = load_config(config_dir / "env.yaml")
 
-    setup_logging(env_cfg)
+    run_slug = coolname.generate_slug(2)
+    run_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    setup_logging(env_cfg, run_slug=run_slug, run_timestamp=run_timestamp)
 
     # Build environment
     environment = CraftaxEnvironment(
@@ -76,7 +84,6 @@ def main() -> None:
         max_steps=env_cfg.get("max_steps", 1000),
         verbose=True,
         replay_fps=env_cfg.get("replay_fps", 8),
-        log_interval=env_cfg.get("log_interval", 1),
     )
 
     # Run

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 import os
 import random
 import re
@@ -7,6 +9,8 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Type
 
 from openai import OpenAI
+
+logger = logging.getLogger("craftax")
 
 from src.models import (
     ACTION_NAMES,
@@ -42,8 +46,21 @@ class BaseAgent(ABC):
         return output
 
     def _record_history(self, agent_input: AgentInput, agent_output: AgentOutput) -> None:
-        self._history.append((agent_input, agent_output))
-        if self.history_length > 0 and len(self._history) > self.history_length:
+        if self.history_length <= 0:
+            return
+        # Store deep copies so later mutations can't rewrite history
+        input_copy = (
+            agent_input.model_copy(deep=True)
+            if hasattr(agent_input, "model_copy")
+            else agent_input
+        )
+        output_copy = (
+            agent_output.model_copy(deep=True)
+            if hasattr(agent_output, "model_copy")
+            else agent_output
+        )
+        self._history.append((input_copy, output_copy))
+        if len(self._history) > self.history_length:
             self._history = self._history[-self.history_length :]
 
     def _format_observation(self, agent_input: AgentInput) -> str:
@@ -202,31 +219,70 @@ class OpenAIAgent(BaseAgent):
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
         # Add history context
-        for past_input, past_output in self._history:
+        for i, (past_input, past_output) in enumerate(self._history, 1):
+            label = f"HISTORY {i}/{len(self._history)}"
             messages.append({
                 "role": "user",
-                "content": self._format_observation(past_input),
+                "content": f"[{label}]\n{self._format_observation(past_input)}",
             })
             messages.append({
                 "role": "assistant",
-                "content": f'{{"action": {past_output.action}, "reasoning": "{past_output.reasoning or ""}"}}',
+                "content": json.dumps({
+                    "action": past_output.action,
+                    "reasoning": past_output.reasoning or "",
+                }),
             })
 
-        messages.append({"role": "user", "content": user_prompt})
+        messages.append({"role": "user", "content": f"[CURRENT]\n{user_prompt}"})
+
+        # Log full message array sent to LLM
+        logger.info(
+            "STEP %d — LLM REQUEST (%d messages, %d history turns)\n%s",
+            agent_input.step,
+            len(messages),
+            len(self._history),
+            "\n".join(
+                f"--- [{m['role'].upper()}] ---\n{m['content']}"
+                for m in messages
+            ),
+        )
 
         response = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
             temperature=self.temperature,
             max_tokens=150,
+            response_format={"type": "json_object"},
         )
 
         content = response.choices[0].message.content or ""
-        return self._parse_response(content)
+
+        # Log raw LLM response
+        logger.info("STEP %d — LLM RAW RESPONSE\n%s", agent_input.step, content)
+
+        output = self._parse_response(content)
+
+        action_name = ACTION_NAMES.get(output.action, "UNKNOWN")
+        logger.info(
+            "STEP %d — PARSED OUTPUT: action=%s (%d) | reasoning=%s",
+            agent_input.step,
+            action_name,
+            output.action,
+            output.reasoning or "-",
+        )
+
+        return output
 
     def _build_user_prompt(self, agent_input: AgentInput) -> str:
-        obs_text = self._format_observation(agent_input)
-        return f"{obs_text}\n\nChoose your next action. Respond with JSON: {{\"action\": <id>, \"reasoning\": \"<why>\"}}"
+        parts = []
+
+        # Current observation
+        parts.append("=== Current Observation ===")
+        parts.append(self._format_observation(agent_input))
+        parts.append("")
+        parts.append('Choose your next action. Respond with JSON: {"action": <id>, "reasoning": "<why>"}')
+
+        return "\n".join(parts)
 
     def _parse_response(self, content: str) -> AgentOutput:
         """Extract action ID from LLM response."""
